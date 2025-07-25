@@ -1,0 +1,23 @@
+
+### 5. Package Configuration Files
+
+#### `packages\database\package.json`
+```json
+{
+  "name": "@miharina/database",
+  "version": "1.0.0",
+  "description": "Miharina database schemas and migrations",
+  "main": "index.js",
+  "scripts": {
+    "migrate": "node migrations/migrate.js",
+    "seed": "node migrations/seed.js",
+    "reset": "node migrations/reset.js"
+  },
+  "dependencies": {
+    "pg": "^8.11.0",
+    "@databases/pg": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.10.0"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "development": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "database": "miharina_dev",
+    "username": "miharina_app",
+    "password": "${DB_PASSWORD}",
+    "dialect": "postgres",
+    "ssl": false,
+    "pool": {
+      "max": 5,
+      "min": 0,
+      "acquire": 30000,
+      "idle": 10000
+    }
+  },
+  "staging": {
+    "host": "35.193.237.155",
+    "port": 5432,
+    "database": "miharina_dev",
+    "username": "miharina_app",
+    "password": "${DB_PASSWORD}",
+    "dialect": "postgres",
+    "ssl": {
+      "require": true,
+      "rejectUnauthorized": true
+    },
+    "pool": {
+      "max": 10,
+      "min": 2,
+      "acquire": 30000,
+      "idle": 10000
+    }
+  },
+  "production": {
+    "host": "35.193.237.155",
+    "port": 5432,
+    "database": "miharina_dev",
+    "username": "miharina_app",
+    "password": "${DB_PASSWORD}",
+    "dialect": "postgres",
+    "ssl": {
+      "require": true,
+      "rejectUnauthorized": true
+    },
+    "pool": {
+      "max": 20,
+      "min": 5,
+      "acquire": 30000,
+      "idle": 10000
+    }
+  }
+}
