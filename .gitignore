@@ -116,4 +116,4 @@ gcloud-service-key.json
 # Terraform
 *.tfstate
 *.tfstate.*
-.terraform/
+.terraform/"miharina-hub-development-firebase-adminsdk-fbsvc-5cccf088aa.json" 
