@@ -1,0 +1,35 @@
+version: '3.8'
+services:
+  web:
+    build: ../apps/web
+    ports:
+      - "3001:3000"
+    env_file:
+      - ../apps/web/.env
+    depends_on:
+      - api
+  api:
+    build: ../apps/api
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../apps/api/.env
+    depends_on:
+      - db
+  ai-service:
+    build: ../apps/ai-service
+    env_file:
+      - ../apps/ai-service/.env
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: miharina_user
+      POSTGRES_PASSWORD: secure_password
+      POSTGRES_DB: miharina_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

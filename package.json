@@ -1,0 +1,19 @@
+{
+  "name": "miharina-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "concurrently \"yarn workspace web start\" \"yarn workspace api start\" \"yarn workspace ai-service start\"",
+    "build": "concurrently \"yarn workspace web build\" \"yarn workspace api build\" \"yarn workspace ai-service build\"",
+    "test": "concurrently \"yarn workspace web test\" \"yarn workspace api test\" \"yarn workspace ai-service test\"",
+    "lint": "concurrently \"yarn workspace web lint\" \"yarn workspace api lint\" \"yarn workspace ai-service lint\""
+  },
+  "devDependencies": {
+    "concurrently": "^7.0.0",
+    "typescript": "^5.0.0"
+  }
+}
