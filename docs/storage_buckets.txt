@@ -1,0 +1,2 @@
+gs://miharina-hub-development-static/
+gs://miharina-hub-development-uploads/

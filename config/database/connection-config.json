@@ -1,7 +1,7 @@
 {
   "development": {
     "host": "127.0.0.1",
-    "port": 5432,
+    "port": 5433,
     "database": "miharina_dev",
     "username": "miharina_app",
     "password": "${DB_PASSWORD}",

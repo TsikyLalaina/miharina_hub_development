@@ -1,0 +1,75 @@
+bindings:
+- members:
+  - serviceAccount:service-940315771768@gcp-sa-cloudaicompanion.iam.gserviceaccount.com
+  role: roles/cloudaicompanion.serviceAgent
+- members:
+  - serviceAccount:940315771768@cloudbuild.gserviceaccount.com
+  role: roles/cloudbuild.builds.builder
+- members:
+  - serviceAccount:service-940315771768@gcp-sa-cloudbuild.iam.gserviceaccount.com
+  role: roles/cloudbuild.serviceAgent
+- members:
+  - serviceAccount:service-940315771768@gcf-admin-robot.iam.gserviceaccount.com
+  role: roles/cloudfunctions.serviceAgent
+- members:
+  - serviceAccount:miharina-database-admin@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/cloudsql.admin
+- members:
+  - serviceAccount:miharina-backend-api@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/cloudsql.client
+- members:
+  - serviceAccount:miharina-ai-service@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/cloudtranslate.user
+- members:
+  - serviceAccount:miharina-frontend-deploy@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/compute.networkAdmin
+- members:
+  - serviceAccount:service-940315771768@compute-system.iam.gserviceaccount.com
+  role: roles/compute.serviceAgent
+- members:
+  - serviceAccount:service-940315771768@containerregistry.iam.gserviceaccount.com
+  role: roles/containerregistry.ServiceAgent
+- members:
+  - serviceAccount:940315771768-compute@developer.gserviceaccount.com
+  - serviceAccount:940315771768@cloudservices.gserviceaccount.com
+  - serviceAccount:miharina-backend-api@miharina-hub-development.iam.gserviceaccount.com
+  - serviceAccount:miharina-hub-development@appspot.gserviceaccount.com
+  role: roles/editor
+- members:
+  - serviceAccount:miharina-backend-api@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/firebase.admin
+- members:
+  - serviceAccount:service-940315771768@gcp-sa-firebase.iam.gserviceaccount.com
+  role: roles/firebase.managementServiceAgent
+- members:
+  - serviceAccount:firebase-adminsdk-fbsvc@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/firebase.sdkAdminServiceAgent
+- members:
+  - serviceAccount:firebase-adminsdk-fbsvc@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/firebaseauth.admin
+- members:
+  - serviceAccount:firebase-adminsdk-fbsvc@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/iam.serviceAccountTokenCreator
+- members:
+  - serviceAccount:miharina-ai-service@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/ml.admin
+- members:
+  - user:tsikyloharantsoa@gmail.com
+  role: roles/owner
+- members:
+  - serviceAccount:service-940315771768@gcp-sa-pubsub.iam.gserviceaccount.com
+  role: roles/pubsub.serviceAgent
+- members:
+  - serviceAccount:service-940315771768@serverless-robot-prod.iam.gserviceaccount.com
+  role: roles/run.serviceAgent
+- members:
+  - serviceAccount:firebase-adminsdk-fbsvc@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/serviceusage.serviceUsageConsumer
+- members:
+  - serviceAccount:miharina-frontend-deploy@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/storage.admin
+- members:
+  - serviceAccount:miharina-backend-api@miharina-hub-development.iam.gserviceaccount.com
+  role: roles/storage.objectAdmin
+etag: BwY7S7czINo=
+version: 1
