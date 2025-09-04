@@ -84,9 +84,41 @@ export class StorageService {
 
   public async deleteFile(filePath: string): Promise<void> {
     try {
+      // Normalize input to an object path within the bucket
+      let objectPath = filePath;
+
+      // Handle public URL like: https://storage.googleapis.com/<bucket>/<object>
+      if (objectPath.startsWith('http')) {
+        try {
+          const url = new URL(objectPath);
+          // Remove leading '/'
+          const pathname = url.pathname.replace(/^\//, '');
+          const parts = pathname.split('/');
+          // If the first segment is the bucket name, strip it
+          if (parts.length > 1 && parts[0] === this.bucketName) {
+            objectPath = parts.slice(1).join('/');
+          } else {
+            // Some CDNs or custom domains might already be bucket-relative
+            objectPath = pathname;
+          }
+        } catch {
+          // Fallback: keep original string
+        }
+      }
+
+      // Handle gs://<bucket>/<object>
+      if (objectPath.startsWith('gs://')) {
+        const withoutScheme = objectPath.replace('gs://', '');
+        const slashIdx = withoutScheme.indexOf('/');
+        if (slashIdx !== -1) {
+          // const bucketFromUri = withoutScheme.slice(0, slashIdx);
+          objectPath = withoutScheme.slice(slashIdx + 1);
+        }
+      }
+
       const bucket = this.storage.bucket(this.bucketName);
-      await bucket.file(filePath).delete();
-      console.log(` File deleted: ${filePath}`);
+      await bucket.file(objectPath).delete();
+      console.log(` File deleted: ${objectPath}`);
     } catch (error: any) {
       console.error(' Storage delete error:', error);
       throw new Error(`Failed to delete file: ${error.message}`);

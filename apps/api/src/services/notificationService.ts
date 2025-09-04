@@ -145,7 +145,7 @@ export class NotificationService {
 
   private async sendEmailNotification(options: NotificationOptions): Promise<void> {
     try {
-      const userQuery = 'SELECT email FROM users WHERE id = $1';
+      const userQuery = 'SELECT email FROM users WHERE user_id = $1';
       const userResult = await query(userQuery, [options.userId]);
       
       if (userResult.rows.length > 0) {

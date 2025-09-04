@@ -221,9 +221,12 @@ export class AuthController {
       // Create user record in database
       const client = await dbManager.getClient();
       try {
+        // Detect preferred language from middleware (Accept-Language / X-User-Language)
+        const userLanguage = (req as any).userLanguage || 'fr';
+
         const insertQuery = `
-          INSERT INTO users (firebase_uid, email, phone_number, display_name, created_at, updated_at)
-          VALUES ($1, $2, $3, $4, NOW(), NOW())
+          INSERT INTO users (firebase_uid, email, phone_number, display_name, preferred_language, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
           RETURNING *
         `;
 
@@ -231,7 +234,8 @@ export class AuthController {
           userRecord.uid,
           email,
           phoneNumber,
-          finalDisplayName
+          finalDisplayName,
+          userLanguage
         ]);
 
         userData = result.rows[0];
@@ -240,9 +244,7 @@ export class AuthController {
 
         // Send welcome email - required for registration completion
         try {
-          // Use detected language from middleware, fallback to French
-          const userLanguage = (req as any).userLanguage || 'fr';
-
+          // Use same detected language for welcome email
           await this.emailService!.sendWelcomeEmail(
             email,
             finalDisplayName,
@@ -412,10 +414,20 @@ export class AuthController {
         return;
       }
 
-      const { displayName, phone, preferredLanguage } = req.body;
+      // Accept multiple naming conventions from clients (email updates are not allowed)
+      const {
+        displayName,
+        phone,
+        phoneNumber,
+        preferredLanguage,
+        preferred_language
+      } = req.body as any;
+
+      const finalPhone: string | undefined = phone ?? phoneNumber;
+      const finalPreferredLanguage: 'fr' | 'mg' | 'en' | undefined = (preferredLanguage ?? preferred_language) as any;
 
       // Validate preferred language if provided
-      if (preferredLanguage && !['fr', 'mg', 'en'].includes(preferredLanguage)) {
+      if (finalPreferredLanguage && !['fr', 'mg', 'en'].includes(finalPreferredLanguage)) {
         res.status(400).json({
           error: 'Invalid preferred language. Must be fr, mg, or en',
           error_fr: 'Langue préférée invalide. Doit être fr, mg ou en',
@@ -436,7 +448,7 @@ export class AuthController {
           RETURNING *
         `;
 
-        const result = await client.query(updateQuery, [displayName, phone, preferredLanguage, uid]);
+        const result = await client.query(updateQuery, [displayName, finalPhone, finalPreferredLanguage, uid]);
 
         if (result.rows.length === 0) {
           res.status(404).json({ error: 'User not found' });
@@ -445,11 +457,17 @@ export class AuthController {
 
         const user = result.rows[0];
 
-        // Update Firebase user
-        await firebaseManager.updateUser(uid, {
-          displayName: displayName || undefined,
-          phoneNumber: phone || undefined
-        });
+        // Update Firebase user (include only defined fields to satisfy exactOptionalPropertyTypes)
+        const firebaseUpdate: { displayName?: string; phoneNumber?: string } = {};
+        if (typeof displayName === 'string' && displayName.trim().length > 0) {
+          firebaseUpdate.displayName = displayName.trim();
+        }
+        if (typeof finalPhone === 'string' && finalPhone.trim().length > 0) {
+          firebaseUpdate.phoneNumber = finalPhone.trim();
+        }
+        if (Object.keys(firebaseUpdate).length > 0) {
+          await firebaseManager.updateUser(uid, firebaseUpdate);
+        }
 
         res.json({
           success: true,

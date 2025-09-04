@@ -97,8 +97,8 @@ export class OpportunityController {
         try {
           if (this.notificationService) {
             await this.notificationService.createOpportunityNotification(
-              opportunity.opportunity_id,
-              userId
+              userId,
+              opportunity.opportunity_id
             );
           }
         } catch (notificationError) {
@@ -158,8 +158,7 @@ export class OpportunityController {
           SELECT 
             o.*,
             u.email as creator_email,
-            u.first_name as creator_first_name,
-            u.last_name as creator_last_name,
+            u.display_name as creator_display_name,
             bp.name_fr as business_name_fr,
             bp.name_en as business_name_en,
             bp.business_type as creator_business_type,
@@ -304,8 +303,7 @@ export class OpportunityController {
             createdBy: row.created_by,
             // Additional creator info from joins
             creatorEmail: row.creator_email,
-            creatorFirstName: row.creator_first_name,
-            creatorLastName: row.creator_last_name,
+            creatorDisplayName: row.creator_display_name,
             creatorBusinessNameFr: row.business_name_fr,
             creatorBusinessNameEn: row.business_name_en,
             creatorBusinessType: row.creator_business_type,
@@ -337,8 +335,7 @@ export class OpportunityController {
           SELECT 
             o.*,
             u.email as creator_email,
-            u.first_name as creator_first_name,
-            u.last_name as creator_last_name,
+            u.display_name as creator_display_name,
             bp.name_fr as business_name_fr,
             bp.name_en as business_name_en,
             bp.name_mg as business_name_mg,
@@ -384,8 +381,7 @@ export class OpportunityController {
             createdBy: opportunity.created_by,
             // Additional creator info from joins
             creatorEmail: opportunity.creator_email,
-            creatorFirstName: opportunity.creator_first_name,
-            creatorLastName: opportunity.creator_last_name,
+            creatorDisplayName: opportunity.creator_display_name,
             creatorBusinessNameFr: opportunity.business_name_fr,
             creatorBusinessNameEn: opportunity.business_name_en,
             creatorBusinessNameMg: opportunity.business_name_mg,
@@ -448,38 +444,38 @@ export class OpportunityController {
 
         const updateQuery = `
           UPDATE opportunities 
-          SET title_fr = $1,
-              title_mg = $2,
-              title_en = $3,
-              description_fr = $4,
-              description_mg = $5,
-              description_en = $6,
-              business_type = $7,
-              target_countries = $8,
-              industry = $9,
-              estimated_value = $10,
-              currency = $11,
-              expiration_date = $12,
-              status = $13,
+          SET title_fr = COALESCE($1, title_fr),
+              title_mg = COALESCE($2, title_mg),
+              title_en = COALESCE($3, title_en),
+              description_fr = COALESCE($4, description_fr),
+              description_mg = COALESCE($5, description_mg),
+              description_en = COALESCE($6, description_en),
+              business_type = COALESCE($7, business_type),
+              target_countries = COALESCE($8::jsonb, target_countries),
+              industry = COALESCE($9, industry),
+              estimated_value = COALESCE($10, estimated_value),
+              currency = COALESCE($11, currency),
+              expiration_date = COALESCE($12, expiration_date),
+              status = COALESCE($13, status),
               updated_at = NOW()
           WHERE opportunity_id = $14
           RETURNING *
         `;
 
         const result = await client.query(updateQuery, [
-          title_fr,
-          title_mg,
-          title_en,
-          description_fr,
-          description_mg,
-          description_en,
-          business_type,
-          target_countries ? JSON.stringify(target_countries) : null, // Convert to JSON string for JSONB
-          industry,
-          estimated_value,
-          currency,
-          expiration_date,
-          status || 'active',
+          title_fr ?? null,
+          title_mg ?? null,
+          title_en ?? null,
+          description_fr ?? null,
+          description_mg ?? null,
+          description_en ?? null,
+          business_type ?? null,
+          target_countries !== undefined ? JSON.stringify(target_countries) : null, // keep existing if undefined
+          industry ?? null,
+          estimated_value ?? null,
+          currency ?? null,
+          expiration_date ?? null,
+          status ?? null,
           id
         ]);
 

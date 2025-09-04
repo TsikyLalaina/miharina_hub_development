@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import multer from 'multer';
+// Multer configuration is centralized in middleware/upload
 import { StorageService } from '../services/storageService';
 import { dbManager } from '../config/database';
 
@@ -11,21 +11,8 @@ interface AuthRequest extends Request {
   file?: Express.Multer.File;
 }
 
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
-  fileFilter: (_req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only JPEG, PNG, WebP, and PDF files are allowed.'));
-    }
-  }
-});
+// Multer storage, file size limits and mime type filtering are enforced by
+// the centralized upload middleware defined in ../middleware/upload.
 
 export class UploadController {
   private storageService: StorageService;
@@ -34,7 +21,7 @@ export class UploadController {
     this.storageService = StorageService.getInstance();
   }
 
-  public upload = upload.single('file');
+  // Upload middleware is applied at the route level (see routes/index.ts)
 
   public async uploadFile(req: AuthRequest, res: Response): Promise<void> {
     try {
@@ -49,7 +36,7 @@ export class UploadController {
         return;
       }
 
-      const { type, businessId } = req.body;
+      const { type, businessId, opportunityId } = req.body;
       const allowedTypes = ['profile', 'business', 'opportunity', 'document'];
       if (!allowedTypes.includes(type)) {
         res.status(400).json({ error: 'Invalid upload type' });
@@ -66,7 +53,7 @@ export class UploadController {
       // Store file reference in database
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -74,7 +61,7 @@ export class UploadController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
         const insertQuery = `
           INSERT INTO uploads (user_id, file_url, file_type, file_name, uploaded_at)
@@ -89,10 +76,27 @@ export class UploadController {
           req.file.originalname
         ]);
 
-        // Update business profile or opportunity if businessId provided
+        // Update business profile pointer to the uploaded file if businessId provided
         if (businessId && type === 'business') {
-          const updateQuery = 'UPDATE business_profiles SET logo_url = $1 WHERE id = $2';
-          await client.query(updateQuery, [fileUrl, businessId]);
+          const updateQuery = 'UPDATE business_profiles SET logo_upload_id = $1 WHERE business_id = $2';
+          await client.query(updateQuery, [result.rows[0].id, businessId]);
+        }
+
+        // Link upload to an opportunity via join table if provided
+        if (opportunityId && type === 'opportunity') {
+          const role = (req.body.role === 'hero' ? 'hero' : 'attachment');
+          const linkQuery = `
+            INSERT INTO opportunity_uploads (opportunity_id, upload_id, role)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (opportunity_id, upload_id) DO NOTHING
+          `;
+          await client.query(linkQuery, [opportunityId, result.rows[0].id, role]);
+        }
+
+        // Set user's current avatar to this upload when type is profile
+        if (type === 'profile') {
+          const setAvatarQuery = 'UPDATE users SET avatar_upload_id = $1 WHERE user_id = $2';
+          await client.query(setAvatarQuery, [result.rows[0].id, userId]);
         }
 
         res.json({
@@ -124,7 +128,7 @@ export class UploadController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -132,7 +136,7 @@ export class UploadController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
         const query = `
           SELECT id, file_url, file_type, file_name, uploaded_at
@@ -174,7 +178,7 @@ export class UploadController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -182,7 +186,7 @@ export class UploadController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
         const query = `
           DELETE FROM uploads 

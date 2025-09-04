@@ -24,6 +24,8 @@ class MiharinaServer {
   }
 
   private initializeMiddleware(): void {
+    // Trust proxy (needed when behind load balancers / Cloud Run)
+    this.app.set('trust proxy', 1);
     // Security middleware with Madagascar-specific considerations
     this.app.use(helmet({
       contentSecurityPolicy: {
@@ -57,17 +59,27 @@ class MiharinaServer {
       ]
     }));
 
-    // Rate limiting - consider Madagascar's internet infrastructure
+    // Global Rate limiting - consider Madagascar's internet infrastructure
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
-      max: config.nodeEnv === 'development' ? 1000 : 200, // More generous for slower connections
+      max: config.nodeEnv === 'development' ? 100 : 200, // Dev lower for easier testing
+      standardHeaders: true, // send RateLimit-* headers
+      legacyHeaders: false,  // disable X-RateLimit-* headers
       message: {
         error: 'Too many requests, please try again later',
         error_fr: 'Trop de requêtes, veuillez réessayer plus tard',
         error_mg: 'Fangatahana be loatra, andramo indray rehefa afaka kelikeliny'
       },
-      // Skip rate limiting for health checks
-      skip: (req) => req.path === '/health'
+      keyGenerator: (req: express.Request, _res: express.Response): string => {
+        const auth = req.headers['authorization'];
+        if (typeof auth === 'string' && auth.trim().length > 0) {
+          return auth;
+        }
+        // Always return a string: fall back to a constant if IP is missing
+        return req.ip || 'unknown-ip';
+      },
+      // Skip rate limiting for health checks and CORS preflights
+      skip: (req) => req.path === '/health' || req.method === 'OPTIONS'
     });
     this.app.use(limiter);
 

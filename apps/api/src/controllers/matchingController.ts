@@ -21,7 +21,7 @@ export class MatchingController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -29,9 +29,9 @@ export class MatchingController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
-        const businessQuery = 'SELECT * FROM business_profiles WHERE user_id = $1';
+        const businessQuery = 'SELECT business_id, user_id, name_fr, name_en, business_type, region FROM business_profiles WHERE user_id = $1';
         const businessResult = await client.query(businessQuery, [userId]);
         
         if (businessResult.rows.length === 0) {
@@ -44,51 +44,62 @@ export class MatchingController {
         let matchesQuery: string;
         let params: any[] = [userId];
 
-        // Parse sectors parameter - either use provided sectors or fall back to user's sectors
-        const filterSectors = sectors ? 
-          (Array.isArray(sectors) ? sectors : [sectors]) : 
-          (userProfile.sectors || []);
+        // Interpret `sectors` filter as industry/business_type filters depending on query
+        const filterList = sectors ? (Array.isArray(sectors) ? sectors : [sectors]) : [];
 
         if (type === 'opportunities') {
           matchesQuery = `
             SELECT 
-              o.*,
-              bp.business_name,
-              bp.business_type,
-              bp.region,
-              bp.logo_url,
+              o.opportunity_id,
+              o.title_fr,
+              o.title_en,
+              o.description_fr,
+              o.business_type,
+              o.industry,
+              o.estimated_value,
+              o.currency,
+              o.expiration_date,
+              o.created_at,
+              bp.name_fr as business_name,
+              bp.business_type as creator_business_type,
+              bp.region as creator_region,
               85 as match_score,
-              ARRAY['Sector alignment', 'Geographic match', 'Business type compatibility'] as match_reasons
+              ARRAY['Industry alignment', 'Geographic match', 'Business type compatibility'] as match_reasons
             FROM opportunities o
-            JOIN business_profiles bp ON o.business_id = bp.id
-            WHERE o.is_active = true
-              AND o.business_id != (SELECT id FROM business_profiles WHERE user_id = $1)
-              AND ARRAY_LENGTH(ARRAY(
-                SELECT unnest(o.sectors) 
-                INTERSECT 
-                SELECT unnest($2::text[])
-              ), 1) > 0
+            JOIN users u ON o.created_by = u.user_id
+            LEFT JOIN business_profiles bp ON bp.user_id = u.user_id
+            WHERE o.status = 'active'
+              AND o.created_by != $1
+              ${filterList.length > 0 ? 'AND o.industry = ANY($2)' : ''}
             ORDER BY o.created_at DESC
-            LIMIT $3
+            LIMIT $${filterList.length > 0 ? 3 : 2}
           `;
-          params = [userId, filterSectors, Number(limit)];
+          params = filterList.length > 0 ? [userId, filterList, Number(limit)] : [userId, Number(limit)];
         } else {
           matchesQuery = `
             SELECT 
-              bp.*,
+              bp.business_id,
+              bp.user_id,
+              bp.name_fr,
+              bp.name_en,
+              bp.business_type,
+              bp.region,
+              bp.created_at,
               80 as match_score,
               ARRAY['Sector overlap', 'Regional proximity', 'Business synergy'] as match_reasons
             FROM business_profiles bp
             WHERE bp.user_id != $1
-              AND ARRAY_LENGTH(ARRAY(
-                SELECT unnest(bp.sectors) 
-                INTERSECT 
-                SELECT unnest($2::text[])
-              ), 1) > 0
+              AND (
+                bp.business_type = $2 OR
+                bp.region = $3
+              )
+              ${filterList.length > 0 ? 'AND bp.business_type = ANY($4)' : ''}
             ORDER BY bp.created_at DESC
-            LIMIT $3
+            LIMIT $${filterList.length > 0 ? 5 : 4}
           `;
-          params = [userId, filterSectors, Number(limit)];
+          params = filterList.length > 0
+            ? [userId, userProfile.business_type, userProfile.region, filterList, Number(limit)]
+            : [userId, userProfile.business_type, userProfile.region, Number(limit)];
         }
 
         const result = await client.query(matchesQuery, params);
@@ -96,19 +107,18 @@ export class MatchingController {
         res.json({
           success: true,
           matches: result.rows.map((row: any) => ({
-            id: row.id,
-            businessName: row.business_name || row.business_name,
-            businessType: row.business_type || row.business_type,
-            region: row.region,
-            logoUrl: row.logo_url,
-            description: row.description || row.business_description,
+            id: row.opportunity_id || row.business_id,
+            businessName: row.business_name || row.name_fr,
+            businessType: row.creator_business_type || row.business_type,
+            region: row.creator_region || row.region,
+            titleFr: row.title_fr,
+            descriptionFr: row.description_fr,
             matchScore: row.match_score,
             matchReasons: row.match_reasons,
-            sectors: row.sectors,
-            countries: row.countries,
-            amount: row.amount,
+            industry: row.industry,
+            estimatedValue: row.estimated_value,
             currency: row.currency,
-            deadline: row.deadline
+            expirationDate: row.expiration_date
           }))
         });
       } finally {
@@ -123,7 +133,7 @@ export class MatchingController {
   public async createMatch(req: AuthRequest, res: Response): Promise<void> {
     try {
       const userUid = req.user?.uid;
-      const { targetUserId, opportunityId, matchScore, matchReasons } = req.body;
+      const { businessId: inputBusinessId, opportunityId, matchScore, matchReasons } = req.body;
 
       if (!userUid) {
         res.status(401).json({ error: 'Unauthorized' });
@@ -132,7 +142,7 @@ export class MatchingController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -140,16 +150,42 @@ export class MatchingController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
+        // Resolve businessId: use provided one, otherwise default to the caller's primary business profile
+        let businessId = inputBusinessId as string | undefined;
+        if (!businessId) {
+          const bpRes = await client.query(
+            'SELECT business_id FROM business_profiles WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1',
+            [userId]
+          );
+          if (bpRes.rows.length === 0) {
+            res.status(400).json({ error: 'No business profile found for current user. Provide businessId explicitly.' });
+            return;
+          }
+          businessId = bpRes.rows[0].business_id;
+        }
+
+        // Validate opportunity exists
+        if (!opportunityId) {
+          res.status(400).json({ error: 'opportunityId is required' });
+          return;
+        }
+        const oppRes = await client.query(
+          'SELECT opportunity_id FROM opportunities WHERE opportunity_id = $1',
+          [opportunityId]
+        );
+        if (oppRes.rows.length === 0) {
+          res.status(404).json({ error: 'Opportunity not found' });
+          return;
+        }
+
+        // Prevent duplicate match for the same pair
         const existingQuery = `
-          SELECT id FROM matches 
-          WHERE user_id = $1 AND target_user_id = $2 
-          ${opportunityId ? 'AND opportunity_id = $3' : 'AND opportunity_id IS NULL'}
+          SELECT match_id FROM matches 
+          WHERE business_id = $1 AND opportunity_id = $2
         `;
-        
-        const existingParams = opportunityId ? [userId, targetUserId, opportunityId] : [userId, targetUserId];
-        const existingResult = await client.query(existingQuery, existingParams);
+        const existingResult = await client.query(existingQuery, [businessId, opportunityId]);
 
         if (existingResult.rows.length > 0) {
           res.status(409).json({ error: 'Match already exists' });
@@ -158,18 +194,17 @@ export class MatchingController {
 
         const insertQuery = `
           INSERT INTO matches (
-            user_id, target_user_id, opportunity_id, match_score, 
-            match_reasons, status, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+            business_id, opportunity_id, match_score, match_reason, status, created_at, updated_at, created_by
+          ) VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW(), $5)
           RETURNING *
         `;
 
         const result = await client.query(insertQuery, [
-          userId,
-          targetUserId,
-          opportunityId || null,
-          matchScore || 75,
-          JSON.stringify(matchReasons || ['Manual match'])
+          businessId,
+          opportunityId,
+          matchScore ?? 75,
+          (Array.isArray(matchReasons) ? matchReasons.join(', ') : (matchReasons ?? 'Manual match')),
+          userId
         ]);
 
         const match = result.rows[0];
@@ -177,15 +212,15 @@ export class MatchingController {
         res.status(201).json({
           success: true,
           match: {
-            id: match.id,
-            userId: match.user_id,
-            targetUserId: match.target_user_id,
+            id: match.match_id,
+            businessId: match.business_id,
             opportunityId: match.opportunity_id,
             matchScore: match.match_score,
-            matchReasons: match.match_reasons,
+            matchReason: match.match_reason,
             status: match.status,
             createdAt: match.created_at,
-            updatedAt: match.updated_at
+            updatedAt: match.updated_at,
+            createdBy: match.created_by
           }
         });
       } finally {
@@ -209,7 +244,7 @@ export class MatchingController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -217,52 +252,48 @@ export class MatchingController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
-        let query = `
+        // Base SELECT with joins to enrich match info
+        const baseSelect = `
           SELECT 
-            m.*,
-            bp.business_name,
+            m.match_id,
+            m.business_id,
+            m.opportunity_id,
+            m.match_score,
+            m.match_reason,
+            m.status,
+            m.created_at,
+            m.updated_at,
+            m.created_by,
+            bp.name_fr AS business_name,
             bp.business_type,
             bp.region,
-            bp.logo_url,
-            o.title as opportunity_title
+            o.title_fr AS opportunity_title,
+            o.created_by AS opportunity_owner_id
           FROM matches m
-          JOIN business_profiles bp ON m.target_user_id = bp.user_id
-          LEFT JOIN opportunities o ON m.opportunity_id = o.id
-          WHERE m.user_id = $1
+          JOIN business_profiles bp ON m.business_id = bp.business_id
+          JOIN opportunities o ON m.opportunity_id = o.opportunity_id
         `;
 
-        const params = [userId];
-        let paramCount = 1;
-
-        if (status) {
-          paramCount++;
-          query += ` AND m.status = $${paramCount}`;
-          params.push(status);
-        }
+        const params: any[] = [userId];
+        let query: string;
 
         if (type === 'received') {
-          query = `
-            SELECT 
-              m.*,
-              bp.business_name,
-              bp.business_type,
-              bp.region,
-              bp.logo_url,
-              o.title as opportunity_title
-            FROM matches m
-            JOIN business_profiles bp ON m.user_id = bp.user_id
-            LEFT JOIN opportunities o ON m.opportunity_id = o.id
-            WHERE m.target_user_id = $1
+          // Received: matches involving my businesses or my opportunities, not necessarily created by me
+          query = baseSelect + `
+            WHERE (bp.user_id = $1 OR o.created_by = $1)
           `;
-          params[0] = userId;
+        } else {
+          // Sent (default): matches I created
+          query = baseSelect + `
+            WHERE m.created_by = $1
+          `;
+        }
 
-          if (status) {
-            paramCount++;
-            query += ` AND m.status = $${paramCount}`;
-            params.push(status);
-          }
+        if (status) {
+          params.push(status);
+          query += ` AND m.status = $${params.length}`;
         }
 
         query += ' ORDER BY m.created_at DESC';
@@ -272,17 +303,19 @@ export class MatchingController {
         res.json({
           success: true,
           matches: result.rows.map((row: any) => ({
-            id: row.id,
+            id: row.match_id,
+            businessId: row.business_id,
             businessName: row.business_name,
             businessType: row.business_type,
             region: row.region,
-            logoUrl: row.logo_url,
+            opportunityId: row.opportunity_id,
             opportunityTitle: row.opportunity_title,
             matchScore: row.match_score,
-            matchReasons: row.match_reasons,
+            matchReason: row.match_reason,
             status: row.status,
             createdAt: row.created_at,
-            updatedAt: row.updated_at
+            updatedAt: row.updated_at,
+            createdBy: row.created_by
           }))
         });
       } finally {
@@ -297,7 +330,7 @@ export class MatchingController {
   public async updateMatchStatus(req: AuthRequest, res: Response): Promise<void> {
     try {
       const userUid = req.user?.uid;
-      const { id } = req.params;
+      const { id } = req.params; // match_id
       const { status } = req.body;
 
       if (!userUid) {
@@ -312,7 +345,7 @@ export class MatchingController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -320,20 +353,27 @@ export class MatchingController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
-        const matchQuery = 'SELECT * FROM matches WHERE id = $1 AND (user_id = $2 OR target_user_id = $2)';
-        const matchResult = await client.query(matchQuery, [id, userId]);
-
-        if (matchResult.rows.length === 0) {
-          res.status(404).json({ error: 'Match not found' });
+        // Check authorization: user must be creator, opportunity owner, or business owner
+        const authQuery = `
+          SELECT m.match_id
+          FROM matches m
+          JOIN business_profiles bp ON m.business_id = bp.business_id
+          JOIN opportunities o ON m.opportunity_id = o.opportunity_id
+          WHERE m.match_id = $1
+            AND ($2 = m.created_by OR $2 = bp.user_id OR $2 = o.created_by)
+        `;
+        const authRes = await client.query(authQuery, [id, userId]);
+        if (authRes.rows.length === 0) {
+          res.status(404).json({ error: 'Match not found or not authorized' });
           return;
         }
 
         const updateQuery = `
           UPDATE matches 
           SET status = $1, updated_at = NOW()
-          WHERE id = $2
+          WHERE match_id = $2
           RETURNING *
         `;
 
@@ -342,7 +382,7 @@ export class MatchingController {
         res.json({
           success: true,
           match: {
-            id: result.rows[0].id,
+            id: result.rows[0].match_id,
             status: result.rows[0].status,
             updatedAt: result.rows[0].updated_at
           }
@@ -366,7 +406,7 @@ export class MatchingController {
 
       const client = await dbManager.getClient();
       try {
-        const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
+        const userQuery = 'SELECT user_id FROM users WHERE firebase_uid = $1';
         const userResult = await client.query(userQuery, [userUid]);
         
         if (userResult.rows.length === 0) {
@@ -374,16 +414,18 @@ export class MatchingController {
           return;
         }
 
-        const userId = userResult.rows[0].id;
+        const userId = userResult.rows[0].user_id;
 
         const statsQuery = `
           SELECT 
-            COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_matches,
-            COUNT(CASE WHEN status = 'accepted' THEN 1 END) as accepted_matches,
-            COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_matches,
-            AVG(match_score) as avg_match_score
-          FROM matches
-          WHERE user_id = $1 OR target_user_id = $1
+            COUNT(*) FILTER (WHERE m.status = 'pending') AS pending_matches,
+            COUNT(*) FILTER (WHERE m.status = 'accepted') AS accepted_matches,
+            COUNT(*) FILTER (WHERE m.status = 'rejected') AS rejected_matches,
+            AVG(m.match_score) AS avg_match_score
+          FROM matches m
+          JOIN business_profiles bp ON m.business_id = bp.business_id
+          JOIN opportunities o ON m.opportunity_id = o.opportunity_id
+          WHERE m.created_by = $1 OR bp.user_id = $1 OR o.created_by = $1
         `;
 
         const result = await client.query(statsQuery, [userId]);

@@ -137,11 +137,11 @@ export class BusinessProfileController {
             business_type, region, registration_number, 
             contact_phone, contact_email, website_url,
             is_verified, verification_status, export_interests,
-            currency, created_at, updated_at
+            currency, created_by, created_at, updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, false, 'pending', $15, $16, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, false, 'pending', $15, $16, $17, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
           ) RETURNING *
-        `, [profileId, userId, nameFr, nameMg || null, nameEn || null, descriptionFr, descriptionMg || null, descriptionEn || null, businessType, region, registrationNumber || null, contactPhone, contactEmail || null, websiteUrl || null, JSON.stringify(exportInterests), currency]);
+        `, [profileId, userId, nameFr, nameMg || null, nameEn || null, descriptionFr, descriptionMg || null, descriptionEn || null, businessType, region, registrationNumber || null, contactPhone, contactEmail || null, websiteUrl || null, JSON.stringify(exportInterests), currency, userId]);
 
         // Update Firebase custom claims
         await setCustomClaims(user.uid, {
@@ -172,6 +172,140 @@ export class BusinessProfileController {
         error_fr: 'Échec de la création du profil d\'entreprise',
         error_mg: 'Tsy voaforona ny mombamomba ny orinasa'
       });
+    }
+  };
+
+  /**
+   * Create a business profile on behalf of another user (admin/partner)
+   * Body: { targetFirebaseUid, nameFr, descriptionFr, businessType, region, ... }
+   */
+  public createBusinessProfileForUser = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const actor = req.user;
+      if (!actor) {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+
+      const {
+        targetFirebaseUid,
+        nameFr,
+        nameMg,
+        nameEn,
+        descriptionFr,
+        descriptionMg,
+        descriptionEn,
+        businessType,
+        region,
+        registrationNumber,
+        contactPhone,
+        contactEmail,
+        websiteUrl,
+        exportInterests = {},
+        currency = 'MGA'
+      } = req.body || {};
+
+      if (!targetFirebaseUid) {
+        res.status(400).json({ error: 'targetFirebaseUid is required' });
+        return;
+      }
+
+      // Validate required fields
+      if (!nameFr || !descriptionFr || !businessType || !region || !contactPhone) {
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
+      }
+
+      // Validate region
+      const validRegions = ['Antananarivo', 'Fianarantsoa', 'Toamasina', 'Mahajanga', 'Toliara', 'Antsiranana'];
+      if (!validRegions.includes(region)) {
+        res.status(400).json({ error: 'Invalid region' });
+        return;
+      }
+
+      // Validate business type
+      const validBusinessTypes = ['agricultural', 'artisan', 'digital_services', 'manufacturing'];
+      if (!validBusinessTypes.includes(businessType)) {
+        res.status(400).json({ error: 'Invalid business type' });
+        return;
+      }
+
+      // Validate phone number format
+      const phoneRegex = /^\+261[0-9]{9}$/;
+      if (!phoneRegex.test(contactPhone)) {
+        res.status(400).json({ error: 'Invalid phone number format. Must be +261XXXXXXXXX' });
+        return;
+      }
+
+      // Resolve actor and target ids
+      const actorUserId = await getUserIdByFirebaseUid(actor.uid);
+      const targetUserId = await getUserIdByFirebaseUid(targetFirebaseUid);
+
+      // Ensure target has no existing profile
+      const existingProfile = await query(`
+        SELECT business_id FROM business_profiles WHERE user_id = $1
+      `, [targetUserId]);
+      if (existingProfile.rows.length > 0) {
+        res.status(409).json({ error: 'Target user already has a business profile' });
+        return;
+      }
+
+      const profileId = uuidv4();
+
+      await transaction(async (client) => {
+        await client.query(`
+          INSERT INTO business_profiles (
+            business_id, user_id, name_fr, name_mg, name_en,
+            description_fr, description_mg, description_en,
+            business_type, region, registration_number,
+            contact_phone, contact_email, website_url,
+            is_verified, verification_status, export_interests,
+            currency, created_by, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+            false, 'pending', $15, $16, $17, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          ) RETURNING *
+        `, [
+          profileId,
+          targetUserId,
+          nameFr,
+          nameMg || null,
+          nameEn || null,
+          descriptionFr,
+          descriptionMg || null,
+          descriptionEn || null,
+          businessType,
+          region,
+          registrationNumber || null,
+          contactPhone,
+          contactEmail || null,
+          websiteUrl || null,
+          JSON.stringify(exportInterests),
+          currency,
+          actorUserId
+        ]);
+
+        // Update target user's Firebase custom claims
+        await setCustomClaims(targetFirebaseUid, {
+          businessType: businessType as any,
+          region: region as any,
+          verified: false,
+          country: 'madagascar',
+          role: 'entrepreneur',
+          createdAt: Date.now(),
+          lastLogin: Date.now(),
+        });
+      });
+
+      const newProfile = await this.getBusinessProfileFromDb(profileId);
+
+      res.status(201).json({
+        message: 'Business profile created for target user',
+        data: newProfile
+      });
+    } catch (error) {
+      console.error('Create business profile for user error:', error);
+      res.status(500).json({ error: 'Failed to create business profile for target user' });
     }
   };
 
